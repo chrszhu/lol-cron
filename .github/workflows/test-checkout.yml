@@ -1,0 +1,13 @@
+name: Test Checkout
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private source repo
+        uses: actions/checkout@v4
+        with:
+          repository: chrszhu/lol
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+      - run: ls -la match-analytics-fastapi/ | head -20
