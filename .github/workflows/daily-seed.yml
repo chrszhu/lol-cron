@@ -10,8 +10,8 @@ name: Daily Seed & Refresh
 #
 # Runs daily — NA at 06:00 UTC, KR at 08:00 UTC.
 # Processes ~1/7 of the player pool per region per day (7-day refresh cycle),
-# with count=100 match-id fetches (Riot's max) so active players' games
-# aren't silently dropped between refreshes.
+# with count=50 match-id fetches per player (covers ~99% of weekly games)
+# so active players' matches aren't silently dropped between refreshes.
 #
 # Secrets required in THIS repo's settings (Settings → Secrets → Actions):
 #   PRIVATE_REPO_PAT — fine-grained PAT, scoped ONLY to chrszhu/lol,
