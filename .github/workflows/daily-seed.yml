@@ -119,7 +119,7 @@ jobs:
           pip install -r match-analytics-fastapi/requirements.txt \
                       -r match-analytics-fastapi/requirements-server.txt
 
-      - name: Run daily seed — KR (skip rates, NA computes them)
+      - name: Run daily seed — KR (skip rates/build-order, NA computes them)
         working-directory: match-analytics-fastapi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -129,6 +129,7 @@ jobs:
             --region kr \
             --skip-rates \
             --skip-matchups \
+            --skip-build-order \
             ${{ github.event.inputs.skip_refresh == 'true' && '--skip-refresh' || '' }}
 
   # Warm CDN cache on Saturday after matchup aggregation
