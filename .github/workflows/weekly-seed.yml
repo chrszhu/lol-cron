@@ -24,8 +24,14 @@ name: Weekly Seed & Refresh
 
 on:
   schedule:
-    - cron: "0 6 * * 0"    # Weekly Sunday 06:00 UTC — NA1
-    - cron: "0 8 * * 0"    # Weekly Sunday 08:00 UTC — KR
+    - cron: "0 6 * * 0"    # Weekly Sunday 06:00 UTC — NA1 (primary)
+    - cron: "0 8 * * 0"    # Weekly Sunday 08:00 UTC — KR  (primary)
+    - cron: "0 12 * * 0"   # Weekly Sunday 12:00 UTC — NA1 (retry / overflow)
+    - cron: "0 14 * * 0"   # Weekly Sunday 14:00 UTC — KR  (retry / overflow)
+    # Retry runs 6h after primary. If primary finished all players, retry finds
+    # nothing stale and exits in ~2 min. If primary was cut short (e.g. Riot API
+    # was slow), retry picks up the remaining players automatically.
+    # Skips rates/matchups/build-order — those were already computed by the primary.
   workflow_dispatch:
     inputs:
       region:
@@ -45,9 +51,10 @@ jobs:
   seed-na1:
     name: Refresh NA1 players
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours — enough for full weekly refresh
+    timeout-minutes: 360  # 6 hours max
     if: >-
       github.event.schedule == '0 6 * * 0' ||
+      github.event.schedule == '0 12 * * 0' ||
       github.event_name == 'workflow_dispatch' &&
       (github.event.inputs.region == 'na1' || github.event.inputs.region == 'both')
 
@@ -75,12 +82,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-          GAP_FILL_DISABLED: "1"  # Explicitly disable gap-fill to save RUs
+          GAP_FILL_DISABLED: "1"
         run: |
+          # Retry run (12:00 UTC) skips computed steps — already done by primary (06:00)
+          IS_RETRY=${{ github.event.schedule == '0 12 * * 0' }}
           python run_weekly_refresh.py \
             --region na1 \
             ${{ github.event.inputs.skip_refresh == 'true' && '--skip-refresh' || '' }} \
-            ${{ github.event.inputs.skip_matchups == 'true' && '--skip-matchups' || '' }}
+            ${{ github.event.inputs.skip_matchups == 'true' && '--skip-matchups' || '' }} \
+            $([ "$IS_RETRY" = "true" ] && echo "--skip-rates --skip-matchups --skip-build-order" || echo "")
 
   seed-kr:
     name: Refresh KR players
@@ -88,6 +98,7 @@ jobs:
     timeout-minutes: 360
     if: >-
       github.event.schedule == '0 8 * * 0' ||
+      github.event.schedule == '0 14 * * 0' ||
       github.event_name == 'workflow_dispatch' &&
       (github.event.inputs.region == 'kr' || github.event.inputs.region == 'both')
 
@@ -117,6 +128,7 @@ jobs:
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
           GAP_FILL_DISABLED: "1"
         run: |
+          # KR always skips rates/matchups/build-order (NA handles those)
           python run_weekly_refresh.py \
             --region kr \
             --skip-rates \
