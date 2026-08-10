@@ -208,7 +208,9 @@ jobs:
           cache-dependency-path: match-analytics-fastapi/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r match-analytics-fastapi/requirements.txt
+        run: |
+          pip install -r match-analytics-fastapi/requirements.txt \
+                      -r match-analytics-fastapi/requirements-server.txt
 
       - name: Check monthly RU usage — fail if > 75%
         working-directory: match-analytics-fastapi
