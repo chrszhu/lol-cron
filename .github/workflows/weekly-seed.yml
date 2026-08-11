@@ -48,10 +48,66 @@ on:
         default: "false"
 
 jobs:
+  check-ru-budget-pre:
+    name: Pre-check RU budget (block if ≥75%)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout private source repo
+        uses: actions/checkout@v4
+        with:
+          repository: chrszhu/lol
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: match-analytics-fastapi/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r match-analytics-fastapi/requirements.txt \
+                      -r match-analytics-fastapi/requirements-server.txt
+
+      - name: Check RU budget — abort seeding if ≥ 75%
+        working-directory: match-analytics-fastapi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+        run: |
+          python - <<'EOF'
+          import asyncio, sys
+          sys.path.insert(0, ".")
+          import db, seed_pipeline
+
+          async def main():
+              await db.init_pool()
+              usage = await seed_pipeline.get_monthly_ru_usage()
+              pct   = usage.get("budget_used_pct", 0)
+              ru    = usage.get("ru_estimate", 0)
+              matches = usage.get("matches_this_month", 0)
+              print(f"📊 Pre-seed RU check: {pct:.1f}%  ({ru:,} / 50,000,000 RUs, {matches:,} matches this month)")
+
+              if pct >= 90:
+                  print(f"🚨 CRITICAL: {pct:.1f}% used — seeding blocked to protect the free tier.")
+                  sys.exit(1)
+              elif pct >= 75:
+                  print(f"⚠️  WARNING: {pct:.1f}% used — seeding blocked. CockroachDB should have emailed you at 75%.")
+                  sys.exit(1)
+              else:
+                  print(f"✅ RU budget OK ({pct:.1f}%) — proceeding with seeding.")
+
+          asyncio.run(main())
+          EOF
+
   seed-na1:
     name: Refresh NA1 players
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6 hours max
+    needs: check-ru-budget-pre
     if: >-
       github.event.schedule == '0 6 * * 0' ||
       github.event.schedule == '0 12 * * 0' ||
@@ -96,6 +152,7 @@ jobs:
     name: Refresh KR players
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    needs: check-ru-budget-pre
     if: >-
       github.event.schedule == '0 8 * * 0' ||
       github.event.schedule == '0 14 * * 0' ||
