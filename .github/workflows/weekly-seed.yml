@@ -148,6 +148,28 @@ jobs:
             ${{ github.event.inputs.skip_matchups == 'true' && '--skip-matchups' || '' }} \
             $([ "$IS_RETRY" = "true" ] && echo "--skip-rates --skip-matchups --skip-build-order" || echo "")
 
+      # run_weekly_refresh.py computes and WRITES build-orders, ban/pick rates,
+      # the tier list, and per-patch history into static-data/ on this runner.
+      # Without this step those freshly computed files are discarded (the
+      # separate warm-cache job runs on a clean checkout and only produces
+      # champion-insights), leaving the CDN static files frozen. Commit them
+      # here, where they're generated, so the frontend's static-first reads
+      # actually pick up new data (e.g. per-keystone runes, skill order).
+      - name: Commit computed static data (build-orders, rates, tier, history)
+        working-directory: match-analytics-fastapi
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add static-data/
+          if git diff --staged --quiet; then
+            echo "No computed static-data changes"
+          else
+            git commit -m "chore: update computed static data (build-orders/rates/tier/history) [skip ci]"
+            git pull --rebase --autostash origin main || true
+            git push
+            echo "✅ Computed static data committed & pushed to chrszhu/lol"
+          fi
+
   seed-kr:
     name: Refresh KR players
     runs-on: ubuntu-latest
