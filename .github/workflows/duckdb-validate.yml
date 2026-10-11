@@ -39,6 +39,10 @@ on:
         description: "Skip player match refresh (true to only re-export from existing DuckDB)"
         required: false
         default: "false"
+      max_ru_per_run:
+        description: "Cap matches fetched this run (~650 RU/match). Low = fast smoke test; 0 = unlimited (full seed)."
+        required: false
+        default: "30000"
 
 jobs:
   duckdb-validate:
@@ -88,12 +92,23 @@ jobs:
         env:
           DB_BACKEND: "duckdb"
           DUCKDB_PATH: "data/lol.duckdb"
-          RU_BUDGET_ENABLED: "0"   # embedded DB → no RU throttle
           GAP_FILL_DISABLED: "1"
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+          MAX_RU_IN: ${{ github.event.inputs.max_ru_per_run || '30000' }}
           # NOTE: DATABASE_URL intentionally UNSET — DuckDB needs no cloud DB.
         run: |
           mkdir -p data
+          # max_ru_per_run=0 → unlimited full seed (RU budgeting OFF).
+          # otherwise → enable the per-run cap so a smoke test fetches only a
+          # bounded number of matches, then proceeds to compute + export statics.
+          if [ "$MAX_RU_IN" = "0" ]; then
+            export RU_BUDGET_ENABLED=0
+            echo "🌱 Full-seed mode (no match cap)"
+          else
+            export RU_BUDGET_ENABLED=1
+            export MAX_RU_PER_RUN="$MAX_RU_IN"
+            echo "🔬 Smoke-test mode: cap ~$((MAX_RU_IN / 650)) matches this run"
+          fi
           python run_weekly_refresh.py \
             --region "${{ github.event.inputs.region || 'na1' }}" \
             ${{ github.event.inputs.skip_refresh == 'true' && '--skip-refresh' || '' }}
