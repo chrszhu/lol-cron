@@ -1,0 +1,148 @@
+name: DuckDB Validation (safe, no-commit)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PURPOSE
+#   Validate the embedded DuckDB backend (DB_BACKEND=duckdb) in the REAL cron
+#   environment WITHOUT any risk to production data:
+#
+#     • Runs the exact same pipeline as the weekly cron (run_weekly_refresh.py),
+#       but against a local, file-based DuckDB — no CockroachDB, no RU metering.
+#     • The DuckDB file is persisted between runs via actions/cache, so repeated
+#       manual dispatches ACCUMULATE data over time (self-seeds from the live
+#       Challenger/GM/Master ladder).
+#     • It NEVER commits anything. The freshly-computed static-data/ is uploaded
+#       as a downloadable ARTIFACT for inspection/comparison against the good,
+#       committed statics. The live site is completely unaffected.
+#
+#   Restore point for the good data (if ever needed):
+#     git tag  pre-duckdb-snapshot-2026-10-11   (chrszhu/lol @ e8977c2)
+#
+# HOW TO USE
+#   Actions → "DuckDB Validation (safe, no-commit)" → Run workflow.
+#   Run it a handful of times (each run fetches more ladder data, capped by
+#   MAX_RU_PER_RUN-equivalent time budget) until the DuckDB file has enough
+#   games, then download the "duckdb-static-data" artifact and compare.
+#
+# Secrets required in THIS repo (same as weekly-seed.yml, minus DATABASE_URL):
+#   PRIVATE_REPO_PAT — fine-grained PAT scoped to chrszhu/lol (Contents: Read)
+#   RIOT_API_KEY     — Riot Games API key
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "Region to seed into DuckDB (na1 or kr)"
+        required: false
+        default: "na1"
+      skip_refresh:
+        description: "Skip player match refresh (true to only re-export from existing DuckDB)"
+        required: false
+        default: "false"
+
+jobs:
+  duckdb-validate:
+    name: Run pipeline against embedded DuckDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout private source repo (chrszhu/lol)
+        uses: actions/checkout@v4
+        with:
+          repository: chrszhu/lol
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: match-analytics-fastapi/requirements.txt
+
+      - name: Install dependencies (incl. duckdb + pytz)
+        run: |
+          pip install -r match-analytics-fastapi/requirements.txt \
+                      -r match-analytics-fastapi/requirements-server.txt
+
+      # Persist the DuckDB file across dispatches. The run_id-suffixed key is
+      # always "new" (so the post-step saves a fresh copy), while restore-keys
+      # loads the most recent previous copy — the standard accumulating-cache
+      # pattern. First run finds nothing and starts from an empty DB.
+      - name: Restore DuckDB file (accumulating cache)
+        uses: actions/cache@v4
+        with:
+          path: match-analytics-fastapi/data/lol.duckdb
+          key: lol-duckdb-${{ github.run_id }}
+          restore-keys: |
+            lol-duckdb-
+
+      # Clear the checkout's committed static-data IN THE RUNNER ONLY so the
+      # uploaded artifact reflects purely what DuckDB produced (unambiguous
+      # comparison). This is ephemeral — nothing is ever committed/pushed.
+      - name: Clear checkout static-data (runner-only, for clean artifact)
+        run: rm -rf match-analytics-fastapi/static-data && mkdir -p match-analytics-fastapi/static-data
+
+      - name: Run pipeline on DuckDB
+        working-directory: match-analytics-fastapi
+        env:
+          DB_BACKEND: "duckdb"
+          DUCKDB_PATH: "data/lol.duckdb"
+          RU_BUDGET_ENABLED: "0"   # embedded DB → no RU throttle
+          GAP_FILL_DISABLED: "1"
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+          # NOTE: DATABASE_URL intentionally UNSET — DuckDB needs no cloud DB.
+        run: |
+          mkdir -p data
+          python run_weekly_refresh.py \
+            --region "${{ github.event.inputs.region || 'na1' }}" \
+            ${{ github.event.inputs.skip_refresh == 'true' && '--skip-refresh' || '' }}
+
+      - name: Summarize DuckDB contents
+        if: always()
+        working-directory: match-analytics-fastapi
+        env:
+          DB_BACKEND: "duckdb"
+          DUCKDB_PATH: "data/lol.duckdb"
+        run: |
+          python - <<'EOF'
+          import duckdb, os
+          p = os.environ["DUCKDB_PATH"]
+          if not os.path.exists(p):
+              print("No DuckDB file produced."); raise SystemExit(0)
+          con = duckdb.connect(p, read_only=True)
+          def c(t):
+              try: return con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              except Exception as e: return f"(n/a: {e})"
+          print("📊 DuckDB row counts")
+          for t in ["summoners","seeded_players","ranked_stats","matches",
+                    "match_participants","match_item_events","match_bans",
+                    "champion_matchups","pg_cache"]:
+              print(f"   {t:22s} {c(t)}")
+          try:
+              rows = con.execute(
+                  "SELECT champion_name, COUNT(*) g FROM match_participants "
+                  "GROUP BY 1 ORDER BY 2 DESC LIMIT 10").fetchall()
+              print("🏆 Top champions by games:")
+              for name, g in rows: print(f"   {name:16s} {g}")
+          except Exception as e:
+              print("   (champion rollup n/a:", e, ")")
+          EOF
+
+      - name: Upload freshly-computed static-data (for inspection, NOT committed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckdb-static-data
+          path: match-analytics-fastapi/static-data/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload DuckDB file (for local inspection)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lol-duckdb-file
+          path: match-analytics-fastapi/data/lol.duckdb
+          retention-days: 14
+          if-no-files-found: warn
