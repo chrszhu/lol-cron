@@ -243,7 +243,7 @@ jobs:
       - name: Warm cache and save JSON fallback
         working-directory: match-analytics-fastapi
         env:
-          BASE_URL: "https://lolitembuilds.vercel.app"
+          BASE_URL: "https://zhu-lol.vercel.app"
         run: |
           python warm_cache.py \
             --base-url "$BASE_URL" \
