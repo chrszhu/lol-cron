@@ -23,15 +23,16 @@ name: Weekly Seed & Refresh
 #   RIOT_API_KEY     — same value as in chrszhu/lol
 
 on:
-  schedule:
-    - cron: "0 6 * * 0"    # Weekly Sunday 06:00 UTC — NA1 (primary)
-    - cron: "0 8 * * 0"    # Weekly Sunday 08:00 UTC — KR  (primary)
-    - cron: "0 12 * * 0"   # Weekly Sunday 12:00 UTC — NA1 (retry / overflow)
-    - cron: "0 14 * * 0"   # Weekly Sunday 14:00 UTC — KR  (retry / overflow)
-    # Retry runs 6h after primary. If primary finished all players, retry finds
-    # nothing stale and exits in ~2 min. If primary was cut short (e.g. Riot API
-    # was slow), retry picks up the remaining players automatically.
-    # Skips rates/matchups/build-order — those were already computed by the primary.
+  # DISABLED 2026-10-11: CockroachDB hit its monthly RU limit and was auto-
+  # disabled; this cron targets that (now-dead) DB and would fail every week,
+  # opening cron-failure issues. Superseded by duckdb-validate.yml (embedded
+  # DuckDB accumulator). Schedule removed; kept dispatch-only for reference/
+  # emergency use until CockroachDB is fully decommissioned (Phase 4).
+  # schedule:
+  #   - cron: "0 6 * * 0"    # Weekly Sunday 06:00 UTC — NA1 (primary)
+  #   - cron: "0 8 * * 0"    # Weekly Sunday 08:00 UTC — KR  (primary)
+  #   - cron: "0 12 * * 0"   # Weekly Sunday 12:00 UTC — NA1 (retry / overflow)
+  #   - cron: "0 14 * * 0"   # Weekly Sunday 14:00 UTC — KR  (retry / overflow)
   workflow_dispatch:
     inputs:
       region:

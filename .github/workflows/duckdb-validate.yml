@@ -29,20 +29,31 @@ name: DuckDB Validation (safe, no-commit)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  # Scheduled accumulation: build up current-patch sample over time, like other
+  # sites. Every 6h keeps the DuckDB actions/cache "warm" (well under the 7-day
+  # eviction window) and keeps pulling each ladder player's newly-played games.
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours, both regions, full seed
   workflow_dispatch:
     inputs:
       region:
-        description: "Region to seed into DuckDB (na1 or kr)"
+        description: "Region to seed into DuckDB (na1, kr, or both)"
         required: false
-        default: "na1"
+        default: "both"
       skip_refresh:
         description: "Skip player match refresh (true to only re-export from existing DuckDB)"
         required: false
         default: "false"
       max_ru_per_run:
-        description: "Cap matches fetched this run (~650 RU/match). Low = fast smoke test; 0 = unlimited (full seed)."
+        description: "Cap matches fetched this run (~650 RU/match). 0 = unlimited full seed; low number = fast smoke test."
         required: false
-        default: "30000"
+        default: "0"
+
+# Never let two accumulation runs touch the shared DuckDB cache at once — that
+# would let one run's save clobber the other's data. Queue instead.
+concurrency:
+  group: duckdb-accumulate
+  cancel-in-progress: false
 
 jobs:
   duckdb-validate:
@@ -94,7 +105,9 @@ jobs:
           DUCKDB_PATH: "data/lol.duckdb"
           GAP_FILL_DISABLED: "1"
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-          MAX_RU_IN: ${{ github.event.inputs.max_ru_per_run || '30000' }}
+          MAX_RU_IN: ${{ github.event.inputs.max_ru_per_run || '0' }}
+          REGION_IN: ${{ github.event.inputs.region || 'both' }}
+          SKIP_REFRESH: ${{ github.event.inputs.skip_refresh || 'false' }}
           # NOTE: DATABASE_URL intentionally UNSET — DuckDB needs no cloud DB.
         run: |
           mkdir -p data
@@ -109,9 +122,21 @@ jobs:
             export MAX_RU_PER_RUN="$MAX_RU_IN"
             echo "🔬 Smoke-test mode: cap ~$((MAX_RU_IN / 650)) matches this run"
           fi
-          python run_weekly_refresh.py \
-            --region "${{ github.event.inputs.region || 'na1' }}" \
-            ${{ github.event.inputs.skip_refresh == 'true' && '--skip-refresh' || '' }}
+
+          SKIP=""
+          [ "$SKIP_REFRESH" = "true" ] && SKIP="--skip-refresh"
+
+          # One shared DuckDB file aggregates BOTH regions. For region=both we
+          # fetch KR matches first (fetch-only), then run NA in FULL mode so the
+          # matchup/rate/build-order compute runs once over the combined data.
+          run_full ()  { echo "=== $1 (full compute) ==="; python run_weekly_refresh.py --region "$1" $SKIP; }
+          run_fetch () { echo "=== $1 (fetch only) ===";  python run_weekly_refresh.py --region "$1" --skip-rates --skip-matchups --skip-build-order $SKIP; }
+
+          case "$REGION_IN" in
+            both) run_fetch kr; run_full na1 ;;
+            kr)   run_full kr ;;
+            *)    run_full na1 ;;
+          esac
 
       - name: Summarize DuckDB contents
         if: always()
