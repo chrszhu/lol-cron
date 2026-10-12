@@ -33,7 +33,7 @@ on:
   # sites. Every 6h keeps the DuckDB actions/cache "warm" (well under the 7-day
   # eviction window) and keeps pulling each ladder player's newly-played games.
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours, both regions, full seed
+    - cron: "0 */6 * * *"   # every 6 hours, both regions, bounded chunk
   workflow_dispatch:
     inputs:
       region:
@@ -45,9 +45,9 @@ on:
         required: false
         default: "false"
       max_ru_per_run:
-        description: "Cap matches fetched this run (~650 RU/match). 0 = unlimited full seed; low number = fast smoke test."
+        description: "Match cap this run (~650 RU/match). Default ~3000 keeps each run inside the 350-min CI limit so progress is SAVED. 0 = unlimited (will time out on a full ladder — only for small DBs)."
         required: false
-        default: "0"
+        default: "2000000"
 
 # Never let two accumulation runs touch the shared DuckDB cache at once — that
 # would let one run's save clobber the other's data. Queue instead.
@@ -105,7 +105,7 @@ jobs:
           DUCKDB_PATH: "data/lol.duckdb"
           GAP_FILL_DISABLED: "1"
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-          MAX_RU_IN: ${{ github.event.inputs.max_ru_per_run || '0' }}
+          MAX_RU_IN: ${{ github.event.inputs.max_ru_per_run || '2000000' }}
           REGION_IN: ${{ github.event.inputs.region || 'both' }}
           SKIP_REFRESH: ${{ github.event.inputs.skip_refresh || 'false' }}
           # NOTE: DATABASE_URL intentionally UNSET — DuckDB needs no cloud DB.
