@@ -147,6 +147,7 @@ jobs:
           git config user.email "duckdb-cron@users.noreply.github.com"
           git add static-data/build-orders static-data/item-timelines \
                   static-data/matchups static-data/matchup-runes \
+                  static-data/matchup-builds static-data/matchup-timelines \
                   static-data/history \
                   static-data/ban-rates.json static-data/ban-rates-all.json \
                   static-data/pick-rates.json static-data/pick-rates-all.json \
